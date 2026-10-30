@@ -1,0 +1,30 @@
+meta {
+  name: webhook invalid
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/webhook
+  body: text
+  auth: none
+}
+
+headers {
+  content-type: application/json
+}
+
+body:text {
+  not-json
+}
+
+docs {
+  Не JSON. Ожидается 400 и поле error.
+}
+
+tests {
+  test("invalid body is 400", function() {
+    expect(res.getStatus()).to.equal(400);
+    expect(res.body.error).to.be.a("string");
+  });
+}

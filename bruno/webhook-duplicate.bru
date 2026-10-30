@@ -1,0 +1,36 @@
+meta {
+  name: webhook duplicate
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/webhook
+  body: json
+  auth: none
+}
+
+headers {
+  content-type: application/json
+}
+
+body:json {
+  {
+    "event_id": "abc-123",
+    "type": "payment_succeeded",
+    "payload": {
+      "amount": 99
+    }
+  }
+}
+
+docs {
+  Тот же event_id, что в webhook.bru. Повтор не создаёт вторую запись и отвечает duplicate.
+}
+
+tests {
+  test("duplicate is 200", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.body.status).to.equal("duplicate");
+  });
+}

@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "name": "event-receiver",
+  "type": "collection",
+  "ignore": ["node_modules", ".git"]
+}
