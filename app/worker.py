@@ -2,7 +2,10 @@
 
 import json
 import logging
+import queue
+import threading
 import time
+from contextvars import copy_context
 
 from flask import current_app
 
@@ -13,19 +16,48 @@ from app.queue import claim_task, complete, fail
 log = logging.getLogger(__name__)
 
 
+class HandlerTimeout(Exception):
+    pass
+
+
+def _call_handler(handler, event, timeout):
+    """Вызвать обработчик с таймаутом, не блокируя цикл воркера навсегда."""
+    result = queue.SimpleQueue()
+    context = copy_context()
+
+    def run():
+        try:
+            context.run(handler, event)
+        except BaseException as exc:
+            result.put((False, exc))
+        else:
+            result.put((True, None))
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        raise HandlerTimeout(f"handler timed out after {timeout:g} seconds")
+    ok, error = result.get()
+    if not ok:
+        raise error
+
+
 def process_once(now=None):
     """Обработать одну задачу. Вернуть её id или None, если очередь пуста."""
     db = get_db()
+    fixed_now = now is not None
     if now is None:
         now = current_app.config["CLOCK"]()
-    task_id = claim_task(
+    claim = claim_task(
         db,
         now,
         current_app.config["LEASE_SECONDS"],
         current_app.config["MAX_ATTEMPTS"],
     )
-    if task_id is None:
+    if claim is None:
         return None
+    task_id, locked_until = claim
 
     row = db.execute(
         """
@@ -43,15 +75,29 @@ def process_once(now=None):
     }
     handler = current_app.config["EVENT_HANDLER"]
     try:
-        handler(event)
+        _call_handler(
+            handler,
+            event,
+            current_app.config["HANDLER_TIMEOUT_SECONDS"],
+        )
     except UnknownEventType as exc:
         log.info("task %s skipped: %s", task_id, exc)
-        complete(db, task_id, "skipped", now)
+        finished_at = now if fixed_now else current_app.config["CLOCK"]()
+        complete(db, task_id, "skipped", finished_at, locked_until)
     except Exception as exc:
         log.warning("task %s failed: %s", task_id, exc)
-        fail(db, task_id, str(exc), now, current_app.config["MAX_ATTEMPTS"])
+        finished_at = now if fixed_now else current_app.config["CLOCK"]()
+        fail(
+            db,
+            task_id,
+            str(exc),
+            finished_at,
+            current_app.config["MAX_ATTEMPTS"],
+            locked_until,
+        )
     else:
-        complete(db, task_id, "success", now)
+        finished_at = now if fixed_now else current_app.config["CLOCK"]()
+        complete(db, task_id, "success", finished_at, locked_until)
     return task_id
 
 

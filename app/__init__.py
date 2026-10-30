@@ -18,6 +18,7 @@ def create_app(config=None):
     app.config.from_mapping(
         DATABASE=os.environ.get("DATABASE", str(ROOT / "instance" / "events.db")),
         LEASE_SECONDS=30,
+        HANDLER_TIMEOUT_SECONDS=_env_float("HANDLER_TIMEOUT", 20),
         MAX_ATTEMPTS=3,
         FAIL_RATE=_env_float("FAIL_RATE", 0.2),
         CLOCK=time.time,
